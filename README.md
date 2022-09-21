@@ -306,7 +306,7 @@ Vary: Accept-Encoding
 ]
 ```
 
-At last, we can delete the note we can have created.
+At last, we can delete the note we have created.
 
 ```bash
 
