@@ -151,7 +151,7 @@ But first,let's explore our API and Data model
           "body": {
             "type": "string"
           },
-          "created_on": {
+          "updated_on": {
             "type": "number",
             "minimum": 0
           },

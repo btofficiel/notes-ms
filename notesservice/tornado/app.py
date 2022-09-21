@@ -1,15 +1,22 @@
 # Importing modules
 
 import tornado.web
+import logging
+from types import TracebackType
 from typing import (
     Any,
     Awaitable,
+    Tuple,
     Dict,
     Optional,
+    Type
 )
 import traceback
 import json
+import uuid
 from notesservice.service import NotesService
+from notesservice import LOGGER_NAME
+import notesservice.utils.logutils as logutils
 
 NOTES_LIST_REGEX = r'/notes/?'
 NOTES_REGEX = r'/notes/(?P<id>[a-zA-Z0-9-]+)/?'
@@ -17,43 +24,105 @@ APP_VERSION = r'/v1'
 NOTES_ENTRY_URI_FORMAT_SR = r'/notes/{id}'
 
 
-# Creating a base request handler class
+# Creating BaseRequestHandler class
 class BaseRequestHandler(tornado.web.RequestHandler):
-    # Setting up initializetion hook
     def initialize(
         self,
         service: NotesService,
-        config: Dict
-    ):
+        config: Dict,
+        logger: logging.Logger
+    ) -> None:
         self.service = service
         self.config = config
+        self.logger = logger
+
+    def prepare(self) -> Optional[Awaitable[None]]:
+        req_id = uuid.uuid4().hex
+        logutils.set_log_context(
+            req_id=req_id,
+            method=self.request.method,
+            uri=self.request.uri,
+            ip=self.request.remote_ip
+        )
+
+        logutils.log(
+            self.logger,
+            logging.DEBUG,
+            include_context=True,
+            message='REQUEST'
+        )
+
+        return super().prepare()
+
+    def on_finish(self) -> None:
+        super().on_finish()
 
     def write_error(self, status_code: int, **kwargs: Any) -> None:
-        self.set_header(
-            'Content-Type', 'application/json; charset=UTF-8'
-        )
+        self.set_header('Content-Type', 'application/json; charset=UTF-8')
         body = {
             'method': self.request.method,
             'uri': self.request.path,
             'code': status_code,
             'message': self._reason
         }
-        if self.settings.get("serve_traceback") and "exc_info" in kwargs:
-            # in debug mode, send a traceback
-            trace = '\n'.join(traceback.format_exception(
-                *kwargs['exc_info']
-            ))
-            body['trace'] = trace
+
+        logutils.set_log_context(reason=self._reason)
+
+        if 'exc_info' in kwargs:
+            exc_info = kwargs['exc_info']
+            logutils.set_log_context(exc_info=exc_info)
+            if self.settings.get('serve_traceback'):
+                # in debug mode, send a traceback
+                trace = '\n'.join(traceback.format_exception(*exc_info))
+                body['trace'] = trace
+
         self.finish(body)
 
+    def log_exception(
+        self,
+        typ: Optional[Type[BaseException]],
+        value: Optional[BaseException],
+        tb: Optional[TracebackType],
+    ) -> None:
+        # https://www.tornadoweb.org/en/stable/web.html#tornado.web.RequestHandler.log_exception
+        if isinstance(value, tornado.web.HTTPError):
+            if value.log_message:
+                msg = value.log_message % value.args
+                logutils.log(
+                    tornado.log.gen_log,
+                    logging.WARNING,
+                    status=value.status_code,
+                    request_summary=self._request_summary(),
+                    message=msg
+                )
+        else:
+            logutils.log(
+                tornado.log.app_log,
+                logging.ERROR,
+                message='Uncaught exception',
+                request_summary=self._request_summary(),
+                request=repr(self.request),
+                exc_info=(typ, value, tb)
+            )
 
+
+# Creating DefaultRequestHandler class
 class DefaultRequestHandler(BaseRequestHandler):
-    def initialize(self, status_code, message):
+    def initialize(  # type: ignore
+        self,
+        status_code: int,
+        message: str,
+        logger: logging.Logger
+    ):
+        self.logger = logger
         self.set_status(status_code, reason=message)
 
-    def prepare(self) -> Optional[Awaitable[None]]:  # type: ignore
+    def prepare(self) -> Optional[Awaitable[None]]:
         raise tornado.web.HTTPError(
-            self._status_code, reason=self._reason
+            self._status_code,
+            'request uri: %s',
+            self.request.uri,
+            reason=self._reason
         )
 
 
@@ -172,30 +241,57 @@ class NotesEntryRequestHandler(BaseRequestHandler):
             raise tornado.web.HTTPError(404, reason=str(e))
 
 
+def log_function(handler: tornado.web.RequestHandler) -> None:
+    # https://www.tornadoweb.org/en/stable/web.html#tornado.web.Application.settings
+
+    logger = getattr(handler, 'logger', logging.getLogger(LOGGER_NAME))
+
+    if handler.get_status() < 400:
+        level = logging.INFO
+    elif handler.get_status() < 500:
+        level = logging.WARNING
+    else:
+        level = logging.ERROR
+
+    logutils.log(
+        logger,
+        level,
+        include_context=True,
+        message='RESPONSE',
+        status=handler.get_status(),
+        time_ms=(1000.0 * handler.request.request_time())
+    )
+
+    logutils.clear_log_context()
+
+
 def make_notesservice_app(
     config: Dict,
-    debug: bool
-):
-    service = NotesService(config)
+    debug: bool,
+    logger: logging.Logger
+) -> Tuple[NotesService, tornado.web.Application]:
+    service = NotesService(config, logger)
     app = tornado.web.Application(
         [
             (
                 APP_VERSION + NOTES_LIST_REGEX,
                 NotesRequestHandler,
-                dict(service=service, config=config)
+                dict(service=service, config=config, logger=logger)
             ),
             (
                 APP_VERSION + NOTES_REGEX,
                 NotesEntryRequestHandler,
-                dict(service=service, config=config)
+                dict(service=service, config=config, logger=logger)
             )
         ],
-        compress_response=True,
-        serve_traceback=debug,
+        compress_response=True,  # compress textual responses
+        log_function=log_function,  # log_request() uses it to log results
+        serve_traceback=debug,  # it is passed on as setting to write_error()
         default_handler_class=DefaultRequestHandler,
         default_handler_args={
             'status_code': 404,
-            'message': 'Unknown Endpoint'
+            'message': 'Unknown Endpoint',
+            'logger': logger
         }
     )
 

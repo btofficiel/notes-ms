@@ -1,13 +1,19 @@
 # Importing modules
 import time
 from typing import Dict
+import logging
 import uuid
 
 
 # Creating NotesService class
 class NotesService:
-    def __init__(self, config: Dict):
+    def __init__(
+        self,
+        config: Dict,
+        logger: logging.Logger
+    ) -> None:
         self.notes = {}
+        self.logger = logger
 
     def start(self):
         pass

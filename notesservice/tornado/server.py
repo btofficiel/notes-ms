@@ -1,11 +1,19 @@
 # Importing modules
-import asyncio
+
+import aiotask_context as context  # type: ignore
 import argparse
-import yaml
-import tornado.web
+import asyncio
+import logging
+import logging.config
 from typing import Dict
+import yaml
+
+import tornado.web
+
 from notesservice.service import NotesService
 from notesservice.tornado.app import make_notesservice_app
+from notesservice import LOGGER_NAME
+import notesservice.utils.logutils as logutils
 
 
 def parse_args(args=None):
@@ -47,38 +55,70 @@ def run_server(
     config: Dict,
     port: int,
     debug: bool,
+    logger: logging.Logger
 ):
-    # Line commented due to lint issue
-    # name = config['service']['name']
+    name = config['service']['name']
     loop = asyncio.get_event_loop()
-    service.start()  # Start AddressBook service (business logic)
+    loop.set_task_factory(context.task_factory)
+
+    # Start Notes service
+    service.start()
+
     # Bind http server to port
     http_server_args = {
         'decompress_request': True
     }
     http_server = app.listen(port, '', **http_server_args)
+    logutils.log(
+        logger,
+        logging.INFO,
+        message='STARTING',
+        service_name=name,
+        port=port
+    )
+
     try:
-        loop.run_forever()        # Start asyncio IO event loop
+        # Start asyncio IO event loop
+        loop.run_forever()
     except KeyboardInterrupt:
         # signal.SIGINT
         pass
     finally:
-        loop.stop()               # Stop event loop
-        http_server.stop()        # stop accepting new http reqs
-        loop.run_until_complete(  # Complete all pending coroutines
-            loop.shutdown_asyncgens()
+        loop.stop()
+        logutils.log(
+            logger,
+            logging.INFO,
+            message='SHUTTING DOWN',
+            service_name=name
         )
-        service.stop()            # stop service
-        loop.close()              # close the loop
+        http_server.stop()
+        # loop.run_until_complete(asyncio.gather(*asyncio.Task.all_tasks()))
+        loop.run_until_complete(loop.shutdown_asyncgens())
+        service.stop()
+        loop.close()
+        logutils.log(
+            logger,
+            logging.INFO,
+            message='STOPPED',
+            service_name=name
+        )
 
 
 def main(args=parse_args()):
+    '''
+    Starts the Tornado server serving Notes on the given port
+    '''
 
     config = yaml.load(args.config.read(), Loader=yaml.SafeLoader)
 
-    # Creating note service tornado app
+    # First thing: set logging config
+    logging.config.dictConfig(config['logging'])
+    logger = logging.getLogger(LOGGER_NAME)
+
     notes_service, notes_app = make_notesservice_app(
-        config, args.debug
+            config,
+            args.debug,
+            logger
     )
 
     run_server(
@@ -87,6 +127,7 @@ def main(args=parse_args()):
         config=config,
         port=args.port,
         debug=args.debug,
+        logger=logger
     )
 
 
