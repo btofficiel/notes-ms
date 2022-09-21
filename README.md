@@ -230,7 +230,7 @@ CREATE TABLE notes (
 	id varchar(32) PRIMARY KEY,
 	title varchar NOT NULL,
 	body varchar NOT NULL DEFAULT '',
-	note_type varchar CHECK( note_type IN ('personal', 'work') ),
+	note_type varchar CHECK( note_type IN ('personal', 'work') ) NOT NULL,
 	updated_on bigint DEFAULT 0
 )
 ```
