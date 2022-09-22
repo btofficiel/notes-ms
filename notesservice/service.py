@@ -7,6 +7,7 @@ import uuid
 from notesservice.database.db_engines import create_notes_db
 from notesservice import NOTES_SCHEMA
 from notesservice.datamodel import Note
+from notesservice.utils.asyncutils import run_coroutine
 
 
 # Creating NotesService class
@@ -21,10 +22,12 @@ class NotesService:
         self.notes = {}
 
     def start(self):
-        pass
+        coro = self.notes_db.start()
+        run_coroutine(coro)
 
     def stop(self):
-        pass
+        coro = self.notes_db.stop()
+        run_coroutine(coro)
 
     def _generate_id(self) -> str:
         # Generate UUID string

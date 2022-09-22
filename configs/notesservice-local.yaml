@@ -2,7 +2,7 @@ service:
   name: Notes 
 
 notes-db:
-  fs: /tmp/notesservice-db
+  sql: ./notesservice/database/store.db
 
 logging:
   version: 1

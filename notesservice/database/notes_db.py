@@ -1,7 +1,9 @@
 from abc import ABCMeta, abstractmethod
 import aiofiles  # type: ignore
+import aiosqlite
 import json
 import os
+import subprocess
 from typing import AsyncIterator, Dict, Mapping, Tuple
 import uuid
 
@@ -9,13 +11,17 @@ from notesservice.datamodel import Note
 
 
 class AbstractNotesDB(metaclass=ABCMeta):
-    def start(self):
+    @abstractmethod
+    async def start(self):
         pass
 
-    def stop(self):
+    @abstractmethod
+    async def stop(self):
         pass
 
-    # CRUD
+    @abstractmethod
+    async def _clear(self):
+        pass
 
     @abstractmethod
     async def create_note(
@@ -46,13 +52,22 @@ class InMemoryNotesDB(AbstractNotesDB):
     def __init__(self):
         self.db: Dict[str, Note] = {}
 
+    async def start(self):
+        pass
+
+    async def stop(self):
+        pass
+
+    async def _clear(self):
+        self.db = {}
+
     async def create_note(
         self,
         note: Note,
         id_: str = None
     ) -> str:
         if id_ is None:
-            id_ = uuid.uuid_4().hex
+            id_ = uuid.uuid4().hex
 
         if id_ in self.db:
             raise KeyError('{} already exists'.format(id_))
@@ -66,8 +81,6 @@ class InMemoryNotesDB(AbstractNotesDB):
     async def update_note(self, id_: str, note: Note) -> None:
         if id_ is None or id_ not in self.db:
             raise KeyError('{} does not exist'.format(id_))
-
-        print(note.title)
 
         self.db[id_] = note
 
@@ -96,6 +109,16 @@ class FilesystemNotesDB(AbstractNotesDB):
                 )
             )
         self._store = store_dir
+
+    async def start(self):
+        pass
+
+    async def stop(self):
+        pass
+
+    async def _clear(self):
+        cmd = "rm -rf {0}/*".format(self.store)
+        subprocess.check_output(cmd, shell=True)
 
     @property
     def store(self) -> str:
@@ -178,3 +201,173 @@ class FilesystemNotesDB(AbstractNotesDB):
     ) -> AsyncIterator[Tuple[str, Note]]:
         async for id_, note in self._file_read_all():
             yield id_, Note.from_api_dm(note)
+
+
+class SQLiteNotesDB(AbstractNotesDB):
+    def __init__(self, db_file_path: str):
+        self._store = db_file_path
+        self._connection = None
+
+    @property
+    def connection(self) -> aiosqlite.core.Connection:
+        return self._connection
+
+    @connection.setter
+    def connection(self, conn: aiosqlite.core.Connection) -> None:
+        self._connection = conn
+
+    @property
+    def store(self) -> str:
+        return self._store
+
+    @store.setter
+    def store(self, store_path: str) -> None:
+        self._store = store_path
+
+    async def start(self):
+        self.connection = await aiosqlite.connect(self.store)
+
+        query = '''
+        CREATE TABLE IF NOT EXISTS notes (
+            id varchar(32) PRIMARY KEY,
+            title varchar NOT NULL,
+            body varchar NOT NULL DEFAULT '',
+            note_type varchar
+                CHECK( note_type IN ('personal', 'work') )
+                NOT NULL,
+            updated_on bigint DEFAULT 0
+        );
+        '''
+        await self.connection.execute(query)
+        await self.connection.commit()
+
+    async def stop(self):
+        await self.connection.close()
+
+    async def _clear(self):
+        query = "DELETE FROM notes;"
+        await self.connection.execute(query)
+        await self.connection.commit()
+
+    async def create_note(
+        self,
+        note: Note,
+        id_: str = None
+    ) -> str:
+        if id_:
+            exists = await self._check_if_exists(note.id)
+
+            if exists:
+                raise KeyError("A note exists already with the given ID")
+
+        new_note = [v for k, v in note.to_api_dm().items()]
+
+        if not id_:
+            new_note[0] = uuid.uuid4().hex
+
+        query = '''
+            INSERT INTO notes VALUES($1,$2,$3,$4,$5)
+            ;
+        '''
+
+        await self.connection.execute(query, new_note)
+        await self.connection.commit()
+
+        return new_note[0]
+
+    def dict_from_tuple(self, record):
+        return {
+            "id": record[0],
+            "title": record[1],
+            "body": record[2],
+            "note_type": record[3],
+            "updated_on": record[4]
+        }
+
+    async def read_note(self, id_: str) -> Note:
+        exists = await self._check_if_exists(id_)
+
+        if not exists:
+            raise KeyError("No note found with given ID")
+
+        query = '''
+            SELECT * FROM notes
+            WHERE id=$1
+            ;
+        '''
+
+        result = {}
+
+        cursor = await self.connection.execute(query, [id_])
+        row = await cursor.fetchone()
+        await cursor.close()
+        result = self.dict_from_tuple(row)
+
+        return Note.from_api_dm(result)
+
+    async def _check_if_exists(self, id_: str) -> bool:
+        query = '''
+            SELECT * FROM notes
+            WHERE id=$1
+            ;
+        '''
+
+        cursor = await self.connection.execute(query, [id_])
+        row = await cursor.fetchone()
+        await cursor.close()
+
+        if row:
+            return True
+        else:
+            return False
+
+    async def update_note(self, id_: str, note: Note) -> None:
+        exists = await self._check_if_exists(id_)
+
+        if not exists:
+            raise KeyError("No note found with given ID")
+
+        new_note = [v for k, v in note.to_api_dm().items()]
+
+        query = '''
+            UPDATE notes
+            SET
+            id=$1,
+            title=$2,
+            body=$3,
+            note_type=$4,
+            updated_on=$5
+            WHERE id=$1
+            ;
+        '''
+
+        await self.connection.execute(query, new_note)
+        await self.connection.commit()
+
+    async def delete_note(self, id_: str) -> None:
+        exists = await self._check_if_exists(id_)
+
+        if not exists:
+            raise KeyError("No note found with given ID")
+
+        query = '''
+            DELETE FROM notes
+            WHERE id=$1
+        '''
+
+        await self.connection.execute(query, [id_])
+        await self.connection.commit()
+
+    async def read_all_notes(self) -> AsyncIterator[Tuple[str, Note]]:
+        query = '''
+            SELECT * FROM notes;
+        '''
+
+        cursor = await self.connection.execute(query)
+        rows = await cursor.fetchall()
+        await cursor.close()
+
+        notes = list(map(self.dict_from_tuple, rows))
+
+        for note in notes:
+            yield note["id"], Note.from_api_dm(note)

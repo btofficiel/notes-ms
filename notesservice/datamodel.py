@@ -23,12 +23,16 @@ class Note:
         note_type: NoteType,
         updated_on: int
     ):
+        if id is None:
+            raise ValueError(VALUE_ERR_MSG.format("id", id))
         if title is None:
             raise ValueError(VALUE_ERR_MSG.format("title", title))
         if body is None:
             raise ValueError(VALUE_ERR_MSG.format("body", body))
         if note_type is None:
             raise ValueError(VALUE_ERR_MSG.format("note_type", note_type))
+        if updated_on is None:
+            raise ValueError(VALUE_ERR_MSG.format("updated_on", updated_on))
 
         self._id = id
         self._title = title
@@ -42,6 +46,9 @@ class Note:
 
     @id.setter
     def id(self, value: str) -> None:
+        if not value:
+            raise ValueError(VALUE_ERR_MSG.format('value', value))
+
         self._id = value
 
     @property
@@ -50,6 +57,9 @@ class Note:
 
     @title.setter
     def title(self, value: str) -> None:
+        if not value:
+            raise ValueError(VALUE_ERR_MSG.format('value', value))
+
         self._title = value
 
     @property
@@ -58,6 +68,9 @@ class Note:
 
     @body.setter
     def body(self, value: str) -> None:
+        if not value:
+            raise ValueError(VALUE_ERR_MSG.format('value', value))
+
         self._body = value
 
     @property
@@ -66,6 +79,9 @@ class Note:
 
     @note_type.setter
     def note_type(self, value: NoteType) -> None:
+        if not value:
+            raise ValueError(VALUE_ERR_MSG.format('value', value))
+
         self._note_type = value
 
     @property
@@ -74,6 +90,9 @@ class Note:
 
     @updated_on.setter
     def updated_on(self, value: int) -> None:
+        if not value:
+            raise ValueError(VALUE_ERR_MSG.format('value', value))
+
         self._updated_on = value
 
     @classmethod

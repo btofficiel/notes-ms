@@ -1,7 +1,10 @@
 from typing import Dict
 
 from notesservice.database.notes_db import (
-    AbstractNotesDB, InMemoryNotesDB, FilesystemNotesDB
+    AbstractNotesDB,
+    InMemoryNotesDB,
+    FilesystemNotesDB,
+    SQLiteNotesDB
 )
 
 
@@ -11,5 +14,6 @@ def create_notes_db(notes_db_config: Dict) -> AbstractNotesDB:
 
     return {
         'memory': lambda cfg: InMemoryNotesDB(),
-        'fs': lambda cfg: FilesystemNotesDB(cfg)
+        'fs': lambda cfg: FilesystemNotesDB(cfg),
+        'sql': lambda cfg: SQLiteNotesDB(cfg)
     }[db_type](db_config)
