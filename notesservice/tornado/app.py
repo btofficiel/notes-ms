@@ -138,9 +138,12 @@ class NotesRequestHandler(BaseRequestHandler):
             tornado.web.HTTPError [404] upon Exception
         '''
         try:
-            response = await self.service.get_notes()
+            all_notes = {}
+            async for id_, note in self.service.get_notes():
+                all_notes[id_] = note
+
             self.set_status(200)
-            self.finish(json.dumps(response))
+            self.finish(all_notes)
         except Exception as e:
             raise tornado.web.HTTPError(404, reason=str(e))
 
