@@ -1,6 +1,9 @@
 service:
   name: Notes 
 
+notes-db:
+  fs: /tmp/notesservice-db
+
 logging:
   version: 1
   formatters:

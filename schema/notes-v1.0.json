@@ -1,0 +1,36 @@
+{
+	"$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "Schema of a note taking app",
+    "definitions": {
+      "noteType": {
+        "type": "string",
+        "enum": ["personal", "work"]
+      },
+      "noteEntry": {
+        "$id": "#noteEntry",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 32
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "body": {
+            "type": "string"
+          },
+          "updated_on": {
+            "type": "number",
+            "minimum": 0
+          },
+          "note_type": {
+            "$ref": "#/definitions/noteType"
+          }
+       	},
+        "required": ["title","body", "note_type"]
+   	  }
+    },
+    "$ref": "#/definitions/noteEntry"
+}
